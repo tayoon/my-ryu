@@ -1,4 +1,6 @@
 from operator import truediv
+
+from click import command
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
@@ -7,12 +9,15 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ipv4
-from ryu.lib.packet import arp
+from ryu.lib import hub
+
 
 # IPアドレス
 H1_IP_ADDR = '10.0.0.1'
 H2_IP_ADDR = '10.0.0.2'
 H3_IP_ADDR = '10.0.0.3'
+
+HOST_IP = [H1_IP_ADDR, H2_IP_ADDR]
 
 class ProposalSwitch(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -21,6 +26,15 @@ class ProposalSwitch(app_manager.RyuApp):
         super(ProposalSwitch, self).__init__(*args, **kwargs)
         # MACアドレステーブルを初期化
         self.mac_to_port = {}
+
+        # self.thread = hub.spawn(self._test_thread)
+
+
+    # def _test_thread(self):
+    #     while True:
+    #         print("QQQQQQQQQQQQQQQQQQQQQQQQQ")
+    #         hub.sleep(5)
+
 
     # Packet-Inメッセージを受信する準備
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
@@ -39,9 +53,10 @@ class ProposalSwitch(app_manager.RyuApp):
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
 
+
     # Flow-Modメッセージ（追加）
     def add_flow(self, datapath, priority, match, actions):
-        # print('##### add_flow #####')
+        print('##### add_flow #####')
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
@@ -50,11 +65,26 @@ class ProposalSwitch(app_manager.RyuApp):
                                              actions)]
         mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
                                 match=match, instructions=inst)
+
+        # self.logger.info(mod)
+        datapath.send_msg(mod)
+    
+
+    def del_flow(self, datapath, match):
+        print('##### del_flow #####')
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+
+        # mod = parser.OFPFlowMod(datapath=datapath, match=match, cookie=0, command=ofproto.OFPFC_DELETE)
+        mod = parser.OFPFlowMod(datapath=datapath, match=match, out_port=ofproto.OFPP_ANY, out_group=ofproto.OFPG_ANY, command=ofproto.OFPFC_DELETE)
+
+        # self.logger.info(mod)
         datapath.send_msg(mod)
 
+
     # Flow-Modメッセージ（更新）
-    def change_flow(self, datapath, priority, match, cookie, actions):
-        # print('##### change_flow #####')
+    def modify_flow(self, datapath, priority, match, cookie, actions):
+        # print('##### modify_flow #####')
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
@@ -64,6 +94,7 @@ class ProposalSwitch(app_manager.RyuApp):
         mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
                                 match=match, cookie=cookie, command=ofproto.OFPFC_MODIFY, instructions=inst)
         datapath.send_msg(mod)
+
 
     # Packet-Inメッセージ
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -75,10 +106,9 @@ class ProposalSwitch(app_manager.RyuApp):
         parser = datapath.ofproto_parser
 
         # ホストのIPアドレスをリストに追加
-        host_ip = list()
-        host_ip.append(H1_IP_ADDR)
-        host_ip.append(H2_IP_ADDR)
-
+        # host_ip = list()
+        # host_ip.append(H1_IP_ADDR)
+        # host_ip.append(H2_IP_ADDR)
         # print(host_ip)
 
         # Datapath IDの取得（OpenFlowスイッチの識別）
@@ -90,10 +120,9 @@ class ProposalSwitch(app_manager.RyuApp):
         eth_pkt = pkt.get_protocol(ethernet.ethernet)
         dst = eth_pkt.dst
         src = eth_pkt.src
-
         # self.logger.info(pkt)
 
-        # test
+        # プロトコル情報取得
         ipv4_pkt = pkt.get_protocol(ipv4.ipv4)
         # self.logger.info(ipv4_pkt)
 
@@ -131,7 +160,7 @@ class ProposalSwitch(app_manager.RyuApp):
             datapath.send_msg(out)
         else:
             # IP addressの確認
-            flag = self.ipaddress_check(pkt, host_ip)
+            flag = self.ipaddress_check(pkt, HOST_IP)
 
             # IP addressの判定
             if flag == True:
@@ -185,6 +214,13 @@ class ProposalSwitch(app_manager.RyuApp):
 
                 print('<<<<<<DROP PACKET>>>>>>')
 
+                hub.sleep(10)
+
+                self.del_flow(datapath, match)
+
+                HOST_IP.append(H3_IP_ADDR)
+
+
     # IP addressの確認
     def ipaddress_check(self, pkt, host_ip):
         flag = True
@@ -205,3 +241,10 @@ class ProposalSwitch(app_manager.RyuApp):
                 self.logger.info("xxxxx flag is False xxxxx   --> %s", ipv4_src)
             
         return flag
+    
+    # @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
+    # def _flow_removed_handler(self, ev):
+    #     print("###########################")
+    #     msg = ev.msg
+    #     print(msg)
+
